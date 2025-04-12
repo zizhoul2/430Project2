@@ -1,0 +1,223 @@
+---
+title: "430Project2_data"
+output: pdf_document
+date: "2025-04-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Cleaning
+
+Filter the top 10 least missing locations
+
+```{r}
+library(tidyverse)
+data <- read.csv("weatherAUS 2.csv")
+
+data <- subset(data, Location != "PerthAirport") # this is represented by "Perth"
+
+exclude_cols <- c("Date", "Location", "RainToday", "RainTomorrow")
+weather_vars <- setdiff(names(data), exclude_cols)
+
+library(dplyr)
+
+na_pct_per_location <- data %>%
+  group_by(Location) %>%
+  summarise(across(all_of(weather_vars), ~ mean(is.na(.)), .names = "na_{.col}")) %>%
+  rowwise() %>%
+  mutate(avg_na_pct = mean(c_across(starts_with("na_")))) %>%
+  arrange(avg_na_pct)
+
+head(na_pct_per_location %>% select(Location, avg_na_pct), 10)
+```
+
+"MelbourneAirport","Perth","Darwin","SydneyAirport","Brisbane","Watsonia","Mildura","NorfolkIsland","Townsville","WaggaWagga"
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Load the dataset
+data <- read.csv("weatherAUS 2.csv")
+
+# Filter to selected locations first
+selected_locations <- c("MelbourneAirport", "Perth", "Darwin", "SydneyAirport",
+                        "Brisbane", "Watsonia", "Mildura", "NorfolkIsland",
+                        "Townsville", "WaggaWagga")
+
+data <- data %>%
+  filter(Location %in% selected_locations) |> 
+  filter(Date >= "2009-01-01" & Date <= "2016-12-31") # complete years
+```
+
+```{r}
+MelbourneAirport <- data |> filter(Location == "MelbourneAirport")
+length(unique(MelbourneAirport$Date))
+
+Perth <- data |> filter(Location == "Perth")
+length(unique(Perth$Date))
+
+Darwin <- data |> filter(Location == "Darwin")
+length(unique(Darwin$Date))
+
+SydneyAirport <- data |> filter(Location == "SydneyAirport")
+length(unique(SydneyAirport$Date))
+
+Brisbane <- data |> filter(Location == "Brisbane")
+length(unique(Brisbane$Date))
+
+Watsonia <- data |> filter(Location == "Watsonia")
+length(unique(Watsonia$Date))
+
+Mildura <- data |> filter(Location == "Mildura")
+length(unique(Mildura$Date))
+
+NorfolkIsland <- data |> filter(Location == "NorfolkIsland")
+length(unique(NorfolkIsland$Date))
+
+Townsville <- data |> filter(Location == "Townsville")
+length(unique(Townsville$Date))
+
+WaggaWagga <- data |> filter(Location == "WaggaWagga")
+length(unique(WaggaWagga$Date))
+```
+
+```{r}
+8*365 + 2
+```
+
+This means three months are missing for all locations
+
+They are April 2011, December 2012, February 2013
+
+Impute these months: 
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(zoo)
+
+data <- read.csv("weatherAUS 2.csv")
+
+selected_locations <- c("MelbourneAirport", "Perth", "Darwin", "SydneyAirport",
+                        "Brisbane", "Watsonia", "Mildura", "NorfolkIsland",
+                        "Townsville", "WaggaWagga")
+
+data <- data %>%
+  filter(Location %in% selected_locations)
+
+data$Date <- as.Date(data$Date)
+
+missing_ranges <- seq(as.Date("2011-04-01"), as.Date("2011-04-30"), by = "day") %>%
+  union(seq(as.Date("2012-12-01"), as.Date("2012-12-31"), by = "day")) %>%
+  union(seq(as.Date("2013-02-01"), as.Date("2013-02-28"), by = "day"))
+
+missing_combinations <- expand.grid(
+  Location = selected_locations,
+  Date = missing_ranges
+)
+
+missing_combinations$Date <- as.Date(missing_combinations$Date)
+
+data_filled <- full_join(data, missing_combinations, by = c("Location", "Date")) %>%
+  arrange(Location, Date)
+
+data_filled$Year <- year(data_filled$Date)
+
+non_impute_cols <- c("Date", "Location", "RainTomorrow", "RainToday",
+                     "WindGustDir", "WindDir9am", "WindDir3pm", "Year")
+
+numeric_vars <- setdiff(names(data_filled), non_impute_cols)
+categorical_vars <- intersect(names(data_filled), non_impute_cols)
+
+data_filled <- data_filled %>%
+  group_by(Location) %>%
+  mutate(across(all_of(numeric_vars), ~ na.approx(., x = Date, na.rm = FALSE))) %>%
+  ungroup()
+
+data_filled <- data_filled %>%
+  group_by(Location) %>%
+  fill(all_of(c("WindGustDir", "WindDir9am", "WindDir3pm", "RainToday", "RainTomorrow")), .direction = "down") %>%
+  ungroup()
+
+data_filled <- data_filled %>%
+  filter(Date >= as.Date("2009-01-01") & Date <= as.Date("2016-12-31"))
+```
+
+```{r}
+data_filled  # final dataset
+write_csv()
+```
+
+```{r}
+nrow(data_filled)/10 - (365*8 + 2) # Correct
+```
+
+```{r}
+write_csv(data_filled, "weather_data_09_to_16.csv")
+```
+
+# Descriptive Statistics
+
+Raintoday (Yes/No):
+
+```{r}
+rain_counts <- data_filled %>%
+  group_by(Location, RainToday) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = RainToday, values_from = count, values_fill = 0, names_prefix = "Count_")
+
+rain_props <- data_filled %>%
+  group_by(Location, RainToday) %>%
+  summarise(p = n(), .groups = "drop") %>%
+  group_by(Location) %>%
+  mutate(prop = p / sum(p)) %>%
+  select(-p) %>%
+  pivot_wider(names_from = RainToday, values_from = prop, values_fill = 0, names_prefix = "Prop_")
+
+rain_summary <- left_join(rain_counts, rain_props, by = "Location")
+rain_summary # Across Locations
+
+overall_rainy_percent <- data_filled %>%
+  summarise(
+    rainy_days = sum(RainToday == "Yes", na.rm = TRUE),
+    total_days = sum(!is.na(RainToday)),
+    percent_rainy = 100 * rainy_days / total_days
+  )
+
+overall_rainy_percent # Overall
+```
+
+```{r}
+library(ggplot2)
+
+data_summary <- data_filled %>%
+  group_by(Location) %>%
+  summarise(rainy_pct = mean(RainToday == "Yes", na.rm = TRUE))
+
+ggplot(data_summary, aes(x = reorder(Location, -rainy_pct), y = rainy_pct)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Proportion of Rainy Days by Location", y = "Rainy Day %", x = "Location") +
+  theme_minimal()
+```
+
+```{r}
+library(lubridate)
+
+data_timeplot <- data_filled %>%
+  mutate(month = floor_date(Date, "month")) %>%
+  group_by(month) %>%
+  summarise(rainy_pct = mean(RainToday == "Yes", na.rm = TRUE))
+
+ggplot(data_timeplot, aes(x = month, y = rainy_pct)) +
+  geom_line(color = "blue") +
+  labs(title = "Monthly Rainy Day Proportion", y = "Rainy %", x = "Month") +
+  theme_minimal()
+
+```
+
+
+
