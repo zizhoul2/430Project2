@@ -1,0 +1,272 @@
+---
+title: "models"
+author: "Aadya Ranjan"
+date: "2025-04-30"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(pROC)
+data <- read_csv("weather_data_09_to_16.csv")
+data
+```
+
+
+```{r}
+# Drop rows with any remaining missing values
+data <- data %>% drop_na()
+
+# Convert categorical variables to factors
+data$Date <- as.Date(data$Date, format = "%Y-%m-%d")
+
+data$RainTomorrow <- factor(data$RainTomorrow)
+data$RainToday <- factor(data$RainToday)
+data$WindGustDir <- factor(data$WindGustDir)
+data$WindDir9am <- factor(data$WindDir9am)
+data$WindDir3pm <- factor(data$WindDir3pm)
+data$Location <- factor(data$Location)
+
+data$Year <- year(data$Date)
+data$Month <- format(data$Date, "%Y-%m")
+
+data <- data %>% select(-Date)
+
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Split into train/test sets (80/20)
+train_index <- createDataPartition(data$RainTomorrow, p = 0.8, list = FALSE)
+train <- data[train_index, ]
+test <- data[-train_index, ]
+
+```
+
+
+
+```{r}
+ggplot(data, aes(x = Sunshine, fill = RainTomorrow)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Sunshine Distribution by Rain Tomorrow", x = "Sunshine (hrs)") +
+  theme_minimal()
+
+```
+```{r}
+monthly_rain <- data %>%
+  group_by(Month) %>%
+  summarise(RainyPct = mean(RainTomorrow == "Yes", na.rm = TRUE)) %>%
+  arrange(Month)  # Ensure months are in correct order
+
+# Plot the trend of rainy days
+ggplot(monthly_rain, aes(x = Month, y = RainyPct, group = 1)) +  # Add group aesthetic
+  geom_line(color = "blue") +
+  labs(title = "Monthly Rainy Day Proportion", y = "Proportion of Rainy Days", x = "Month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+```{r}
+# Logistic model using all predictors
+logit_model <- glm(RainTomorrow ~ ., data = train, family = "binomial")
+
+# Predict probabilities
+logit_probs <- predict(logit_model, test, type = "response")
+logit_pred <- ifelse(logit_probs > 0.5, "Yes", "No") %>% factor(levels = c("No", "Yes"))
+
+# Confusion matrix
+confusionMatrix(logit_pred, test$RainTomorrow)
+
+# AUC
+roc_obj <- roc(test$RainTomorrow, logit_probs)
+auc(roc_obj)
+
+
+```
+
+```{r}
+log_roc <- roc(response = test$RainTomorrow, predictor = logit_probs)
+plot(log_roc, col = "red", main = "Logistic Regression ROC")
+auc(log_roc)
+
+```
+
+
+```{r}
+# Fit random forest (default 500 trees)
+rf_model <- randomForest(RainTomorrow ~ ., data = train, ntree = 200, importance = TRUE)
+
+# Predict on test set
+rf_pred <- predict(rf_model, test)
+
+# Confusion matrix
+confusionMatrix(rf_pred, test$RainTomorrow)
+```
+```{r}
+# Variable importance plot
+varImpPlot(rf_model)
+
+```
+
+```{r}
+
+rf_probs <- predict(rf_model, test, type = "prob")[, "Yes"]
+rf_roc <- roc(test$RainTomorrow, rf_probs)
+plot(rf_roc, col = "darkgreen", main = "Random Forest ROC")
+auc(rf_roc)
+
+```
+```{r}
+library(pROC)
+roc_log <- roc(test$RainTomorrow, logit_probs)
+roc_rf <- roc(test$RainTomorrow, rf_probs)
+
+plot(roc_log, col = "red", lwd = 2, main = "ROC Curves", legacy.axes = TRUE)
+lines(roc_rf, col = "green", lwd = 2)
+legend("bottomright", legend = c("Logistic", "Random Forest"),
+       col = c("red", "green"), lwd = 2)
+
+
+```
+
+```{r}
+cat("AUC (Logistic Regression):", auc(log_roc), "\n")
+cat("AUC (Random Forest):", auc(rf_roc), "\n")
+
+```
+The Random Forest model slightly outperforms Logistic Regression with an AUC of 0.903 vs. 0.892, indicating better overall ability to distinguish between rainy and non-rainy days
+
+
+```{r}
+# tune_grid <- expand.grid(mtry = c(2, 4, 6, 8, 10))
+# 
+# control <- trainControl(method = "cv", number = 5)
+# 
+# rf_tuned <- train(
+#   RainTomorrow ~ ., 
+#   data = train, 
+#   method = "rf",
+#   trControl = control,
+#   tuneGrid = tune_grid,
+#   ntree = 300
+# )
+# 
+# print(rf_tuned)
+# plot(rf_tuned)
+
+```
+
+
+```{r}
+# library(glmnet)
+# 
+# # Prepare matrices
+# x_train <- model.matrix(RainTomorrow ~ . - 1, data = train)
+# y_train <- train$RainTomorrow
+# 
+# cv_logit <- cv.glmnet(x_train, y_train, family = "binomial", alpha = 0)
+# 
+# # Plot cross-validation results
+# plot(cv_logit)
+# 
+# # Best lambda
+# best_lambda <- cv_logit$lambda.min
+# 
+# # Fit final model
+# logit_glmnet <- glmnet(x_train, y_train, family = "binomial", lambda = best_lambda)
+# 
+# # Predict on test
+# x_test <- model.matrix(RainTomorrow ~ . - 1, data = test)
+# logit_prob <- predict(logit_glmnet, newx = x_test, type = "response")
+# logit_class <- ifelse(logit_prob > 0.5, "Yes", "No")
+# confusionMatrix(factor(logit_class, levels = levels(test$RainTomorrow)), test$RainTomorrow, positive = "Yes")
+
+```
+
+```{r}
+#install.packages("PRROC")
+library(PRROC)
+
+# PR curve requires positive class probs
+pr_log <- pr.curve(scores.class0 = logit_probs[test$RainTomorrow == "Yes"],
+                   scores.class1 = logit_probs[test$RainTomorrow == "No"], curve = TRUE)
+pr_rf <- pr.curve(scores.class0 = rf_probs[test$RainTomorrow == "Yes"],
+                  scores.class1 = rf_probs[test$RainTomorrow == "No"], curve = TRUE)
+
+plot(pr_log, col = "cyan", main = "Precision-Recall Curve", lwd = 2)
+lines(pr_rf$curve[,1], pr_rf$curve[,2], col = "maroon", lwd = 2)
+legend("bottomleft", legend = c("Logistic", "Random Forest"),
+       col = c("cyan", "maroon"), lwd = 2)
+
+```
+
+```{r}
+library(caret)
+library(ggplot2)
+
+conf_mat_log <- confusionMatrix(logit_pred, test$RainTomorrow)
+conf_mat_rf <- confusionMatrix(rf_pred, test$RainTomorrow)
+
+# Convert to dataframe for ggplot
+plot_conf_mat <- function(cm, title) {
+  df <- as.data.frame(cm$table)
+  ggplot(df, aes(Prediction, Reference, fill = Freq)) +
+    geom_tile() +
+    geom_text(aes(label = Freq), color = "white", size = 5) +
+    scale_fill_gradient(low = "blue", high = "orange") +
+    labs(title = title, x = "Predicted", y = "Actual") +
+    theme_minimal()
+}
+
+plot_conf_mat(conf_mat_log, "Confusion Matrix - Logistic")
+plot_conf_mat(conf_mat_rf, "Confusion Matrix - Random Forest")
+
+```
+
+```{r}
+# Manually input metrics after computing precision/recall/F1/accuracy
+
+# Logistic Regression Metrics
+conf_log <- confusionMatrix(logit_pred, test$RainTomorrow, positive = "Yes")
+log_acc <- conf_log$overall["Accuracy"]
+log_precision <- conf_log$byClass["Precision"]
+log_recall <- conf_log$byClass["Recall"]
+log_f1 <- conf_log$byClass["F1"]
+
+# Random Forest Metrics
+conf_rf <- confusionMatrix(rf_pred, test$RainTomorrow, positive = "Yes")
+rf_acc <- conf_rf$overall["Accuracy"]
+rf_precision <- conf_rf$byClass["Precision"]
+rf_recall <- conf_rf$byClass["Recall"]
+rf_f1 <- conf_rf$byClass["F1"]
+
+model_perf <- data.frame(
+  Model = c("Logistic Regression", "Random Forest"),
+  Accuracy = c(log_acc, rf_acc),
+  Precision = c(log_precision, rf_precision),
+  Recall = c(log_recall, rf_recall),
+  F1_Score = c(log_f1, rf_f1)
+)
+
+print(model_perf)
+```
+
+```{r}
+library(reshape2)
+
+# Reshape for ggplot
+model_perf_long <- melt(model_perf, id.vars = "Model")
+
+# Plot
+ggplot(model_perf_long, aes(x = variable, y = value, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Model Comparison Metrics",
+       x = "Metric", y = "Score") +
+  theme_minimal()
+
+
+```
+
