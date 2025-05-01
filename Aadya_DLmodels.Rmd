@@ -86,6 +86,24 @@ auc(roc_obj)
 
 
 ```
+```{r}
+# AIC and BIC
+logit_aic <- AIC(logit_model)
+logit_bic <- BIC(logit_model)
+
+# Mean Squared Error (MSE)
+logit_mse <- mean((as.numeric(test$RainTomorrow) - as.numeric(logit_pred))^2)
+
+# Mean Squared Prediction Error (MSPE)
+logit_mspe <- mean((as.numeric(test$RainTomorrow) - logit_probs)^2)
+
+cat("Logistic Regression\n")
+cat("AIC:", logit_aic, "\n")
+cat("BIC:", logit_bic, "\n")
+cat("MSE:", logit_mse, "\n")
+cat("MSPE:", logit_mspe, "\n\n")
+
+```
 
 ```{r}
 log_roc <- roc(response = test$RainTomorrow, predictor = logit_probs)
@@ -105,6 +123,25 @@ rf_pred <- predict(rf_model, test)
 # Confusion matrix
 confusionMatrix(rf_pred, test$RainTomorrow)
 ```
+```{r}
+# Convert factors to numeric (Yes = 2, No = 1)
+actual <- as.numeric(test$RainTomorrow)
+rf_pred_numeric <- as.numeric(rf_pred)
+
+# MSE
+rf_mse <- mean((actual - rf_pred_numeric)^2)
+
+# MSPE using class probabilities
+rf_probs <- predict(rf_model, test, type = "prob")[, "Yes"]
+rf_mspe <- mean((actual - rf_probs)^2)
+
+cat("Random Forest\n")
+cat("MSE:", rf_mse, "\n")
+cat("MSPE:", rf_mspe, "\n")
+
+```
+
+
 ```{r}
 # Variable importance plot
 varImpPlot(rf_model)
